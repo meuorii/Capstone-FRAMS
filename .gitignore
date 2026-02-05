@@ -1,0 +1,75 @@
+#################################
+# GLOBAL / OS / IDE
+#################################
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+
+#################################
+# ENV FILES / SECRETS
+#################################
+.env
+.env.*
+!.env.example
+
+#################################
+# CLIENT (React)
+#################################
+client/node_modules/
+
+# Build outputs
+client/dist/
+client/build/
+
+# Logs
+client/npm-debug.log*
+client/yarn-debug.log*
+client/yarn-error.log*
+client/pnpm-debug.log*
+
+# Cache
+client/.eslintcache
+
+# Coverage
+client/coverage/
+
+#################################
+# SERVER (Flask / Python)
+#################################
+# Python cache
+server/__pycache__/
+server/*.py[cod]
+server/*$py.class
+
+# Virtual environments
+server/venv/
+server/env/
+server/.venv/
+
+# Flask
+server/instance/
+server/.webassets-cache
+
+# Logs
+server/*.log
+
+# Database
+server/*.sqlite3
+server/*.db
+
+# Testing
+server/.pytest_cache/
+server/.coverage
+server/htmlcov/
+
+# Type checkers / linters
+server/.mypy_cache/
+server/.ruff_cache/
+server/.pyright/
+
+#################################
+# OPTIONAL (Uncomment if needed)
+#################################
+# server/migrations/
