@@ -42,11 +42,17 @@ client/coverage/
 server/__pycache__/
 server/*.py[cod]
 server/*$py.class
+AI-Microservice/__pycache__/
+AI-Microservice/*.py[cod]
+AI-Microservice/*$py.class
 
 # Virtual environments
 server/venv/
 server/env/
 server/.venv/
+AI-Microservice/venv/
+AI-Microservice/env/
+AI-Microservice/.venv/
 
 # Flask
 server/instance/

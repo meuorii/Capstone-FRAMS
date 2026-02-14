@@ -34,7 +34,7 @@ from routes.auth_routes import auth_bp
 from routes.instructor_routes import instructor_bp
 from routes.attendance_routes import attendance_bp
 from routes.face_routes import face_bp
-from routes.admin_routes import admin_bp
+from routes.admin import admin_bp
 
 app.register_blueprint(auth_bp, url_prefix="/api/auth")
 app.register_blueprint(instructor_bp, url_prefix="/api/instructor")
