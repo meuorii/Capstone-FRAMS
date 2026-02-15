@@ -8,3 +8,4 @@ from . import student_routes
 from . import subject_routes
 from . import semester_routes
 from . import curriculum_routes
+from . import class_routes
