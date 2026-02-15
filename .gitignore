@@ -38,6 +38,11 @@ client/coverage/
 #################################
 # SERVER (Flask / Python)
 #################################
+
+__pycache__/
+*.py[cod]
+*$py.class
+
 # Python cache
 server/__pycache__/
 server/*.py[cod]
