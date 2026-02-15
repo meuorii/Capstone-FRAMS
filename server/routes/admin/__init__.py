@@ -4,3 +4,4 @@ admin_bp = Blueprint("admin_bp", __name__)
 
 from . import auth_routes
 from . import overview_routes
+from . import student_routes
