@@ -2,6 +2,7 @@ from flask import request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt
 from datetime import datetime
 from config.db_config import db
+from bson import ObjectId
 from . import admin_bp
 
 subjects_col = db["subjects"]
@@ -110,26 +111,26 @@ def get_active_subjects():
         return jsonify({"error": str(e)}), 500
 
 #Update Subject
-@admin_bp.route("/api/admin/subjects/<subject_code>", methods=["PUT"])
-def update_subject(subject_code):
+@admin_bp.route("/api/admin/subjects/<id>", methods=["PUT"])
+def update_subject(id):
     data = request.get_json()
     update_data ={}
     for field in [ "subject_code", "subject_title", "course", "year_level", "semester", "curriculum" ]:
         if field in data:
             update_data[field] = data[field]
 
-    result = subjects_col.update_one({"subject_code": subject_code}, {"$set": update_data})
+    result = subjects_col.update_one({"_id": ObjectId(id)}, {"$set": update_data})
     if result.matched_count == 0:
         return jsonify({"error": "Subject not found"}), 404
     
-    updated_subject = subjects_col.find_one({"subject_code": subject_code})
+    updated_subject = subjects_col.find_one({"_id": ObjectId(id)})
     updated_subject["_id"] = str(updated_subject["_id"])
     return jsonify({ "updated subject": updated_subject, "message": "Subject updated successfully" }), 200
 
 #Delete Subject
-@admin_bp.route("/api/admin/subjects/<subject_code>", methods=["DELETE"])
-def delete_subject(subject_code):
-    result = subjects_col.delete_one({"subject_code": subject_code})
+@admin_bp.route("/api/admin/subjects/<id>", methods=["DELETE"])
+def delete_subject(id):
+    result = subjects_col.delete_one({"_id": ObjectId(id)})
     if result.deleted_count == 0:
         return jsonify({"error": "Subject not found"}), 404
     
