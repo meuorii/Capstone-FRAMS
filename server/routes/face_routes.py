@@ -23,7 +23,7 @@ executor = ThreadPoolExecutor(max_workers=4)
 limiter = Limiter(key_func=get_remote_address, default_limits=[])
 
 # Hugging Face microservice endpoint
-HF_AI_URL = "https://meuorii-face-recognition-attendance.hf.space"
+HF_AI_URL = "http://127.0.0.1:7860"
 students_collection = db["students"]
 classes_collection = db["classes"]
 attendance_collection = db["attendance_logs"]

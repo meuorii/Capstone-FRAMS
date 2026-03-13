@@ -135,3 +135,38 @@ def get_free_class():
      }).sort("created_at", -1))
 
      return jsonify([serialize_class(cls) for cls in free_classes]), 200
+
+#Renove Instructor From Class
+@admin_bp.route("/api/admin/classes/<class_id>/remove-instructor", methods=["PUT"])
+@jwt_required()
+def remove_instructor_from_class(class_id):
+    try:
+        admin_program = get_jwt().get("program", "").upper()
+        try:
+            obj_id = ObjectId(class_id)
+            class_obj = classes_col.find_one({"_id": obj_id})
+        except Exception:
+            return jsonify({"error": "Invalid class ID format"}), 400
+        
+        if not class_obj:
+            return jsonify({"error": "Class not found"}), 404
+        
+        if class_obj.get("course", "").upper() != admin_program:
+            return jsonify({ "error": "Forbidden: You cannot modify classes from another program" }), 403
+        
+        classes_col.update_one(
+            {"_id": obj_id},
+            {
+                "$unset": {
+                    "instructor_id": "",
+                    "instructor_first_name": "",
+                    "instructor_last_name": ""
+                }
+            }
+        )
+
+        updated_class = classes_col.find_one({ "_id": ObjectId(obj_id) })
+        return jsonify({ "message": "Instructor unassigned successfully", "updated_class": serialize_class(updated_class) }), 200
+    
+    except Exception:
+        return jsonify({"error": "Internal server error"}), 500

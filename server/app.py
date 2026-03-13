@@ -85,7 +85,7 @@ else:
 # Connectivity check
 def check_reachability():
     urls = {
-        "Hugging Face Space": "https://meuorii-face-recognition-attendance.hf.space",
+        "Hugging Face Space": "http://127.0.0.1:7860",
         "Frontend (Vercel)": "https://face-recognition-attendance-monitor.vercel.app",
     }
     print("\nChecking external service connectivity...")

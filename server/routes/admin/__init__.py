@@ -10,3 +10,4 @@ from . import semester_routes
 from . import curriculum_routes
 from . import class_routes
 from . import instructor_routes
+from . import attendance_reports_routes 

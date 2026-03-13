@@ -411,7 +411,12 @@ def get_all_logs_grouped():
 
         print("LOG QUERY:", query)
 
-        raw_logs = list(attendance_logs_col.find(query))
+        raw_logs = list(
+            attendance_logs_col
+            .find(query)
+            .sort("start_time", -1)
+            .limit(1)
+        )
 
         grouped = {}
         for log in raw_logs:
@@ -422,30 +427,21 @@ def get_all_logs_grouped():
             if date not in grouped:
                 grouped[date] = {
                     "date": date,
-                    "logs": [],
-                    "unique_students": {}
+                    "logs": []
                 }
 
             log["_id"] = str(log["_id"])
             grouped[date]["logs"].append(log)
 
-            # Merge deduped students
-            for s in log.get("students", []):
-                sid = s.get("student_id")
-                if sid:
-                    grouped[date]["unique_students"][sid] = s
-
         final_output = [
             {
                 "date": date,
                 "logs": info["logs"],
-                "students": list(info["unique_students"].values())
             }
             for date, info in grouped.items()
         ]
 
         final_output.sort(key=lambda x: x["date"], reverse=True)
-
         return jsonify({"success": True, "logs": final_output}), 200
 
     except Exception:
