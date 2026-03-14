@@ -1,0 +1,18 @@
+flask
+flask-cors
+
+# AI / Face Recognition
+insightface==0.7.3
+onnxruntime-gpu==1.17.0
+
+# Computer Vision
+opencv-python-headless==4.11.0.86
+mediapipe==0.10.14
+
+# Deep Learning
+timm>=0.9.12
+
+# Core
+numpy==1.26.4
+pillow
+scipy

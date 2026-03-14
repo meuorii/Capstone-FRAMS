@@ -1,0 +1,33 @@
+# Byte-code files
+*.pyc
+__pycache__/
+
+# Virtual environment
+.venv/
+env/
+venv/
+ENV/
+
+# Editor/OS Files
+.DS_Store
+.idea/
+.vscode/
+
+# Flask-specific files/directories
+instance/
+.webassets-cache/
+
+# Test/Coverage files
+.pytest_cache/
+.coverage
+
+# Specific temporary files
+*.log
+*.sqlite
+/tmp/
+
+# Uploaded files (if applicable)
+/uploads/
+
+# AI Models
+models/
