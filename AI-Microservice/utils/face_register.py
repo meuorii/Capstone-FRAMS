@@ -17,15 +17,12 @@ def get_face_angle(landmarks, w, h):
         left_eye = landmarks[33]
         right_eye = landmarks[263]
         mouth = landmarks[13]
-
         nose_y = nose.y * h
         eye_mid_y = ((left_eye.y + right_eye.y) / 2) * h
         mouth_y = mouth.y * h
-
         eye_dist = right_eye.x - left_eye.x
         nose_pos = (nose.x - left_eye.x) / (eye_dist + 1e-6)
         up_down_ratio = (nose_y - eye_mid_y) / (mouth_y - nose_y + 1e-6)
-
         if nose_pos < 0.35:
             return "right"
         elif nose_pos > 0.75:
@@ -44,7 +41,6 @@ def register_face_auto(data):
         student_id = data.get("student_id")
         base64_image = data.get("image")
         angle_from_frontend = data.get("angle")
-
         if not student_id or not base64_image:
             return {"success": False, "error": "Missing student_id or image"}
 
@@ -59,18 +55,16 @@ def register_face_auto(data):
         except Exception as e:
             logging.warning(f"Base64 decoding error: {str(e)}")
             return {"success": False, "error": "Invalid image format"}
-
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb)
         if not results.multi_face_landmarks:
             logging.warning("No face detected by FaceMesh.")
             return {"success": False, "error": "No face detected"}
-
+        
         h, w = img.shape[:2]
         landmarks = results.multi_face_landmarks[0].landmark
         angle = angle_from_frontend or get_face_angle(landmarks, w, h)
         logging.info(f"Detected angle: {angle}")
-
         if angle.lower() == "down":
             logging.info("Enhancing image for better DOWN-angle detection...")
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -82,7 +76,6 @@ def register_face_auto(data):
             y_end = int(h * 0.85)
             img = img[y_start:y_end, :]
             logging.info("Image enhanced for DOWN angle.")
-
         if angle.lower() == "right":
             logging.info("Enhancing image for better RIGHT-angle detection...")
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -91,8 +84,6 @@ def register_face_auto(data):
             enhanced = cv2.convertScaleAbs(enhanced, alpha=1.3, beta=25)
             img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
             logging.info("Image enhanced for RIGHT angle.")
-
-
         if face_model is None:
             return {"success": False, "error": "Face model not initialized"}
 
