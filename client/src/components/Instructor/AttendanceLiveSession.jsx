@@ -47,6 +47,9 @@ const AttendanceLiveSession = ({
   const isProcessingFrame = useRef(false);
   const lastSentRef = useRef(0);
   const rafIdRef = useRef(null);
+  const [blurWarning, setBlurWarning] = useState(false);
+  const blurWarningTimerRef = useRef(null);
+  const [faceCount, setFaceCount] = useState(0);
 
   const formatName = (value = "") =>
     value
@@ -83,7 +86,13 @@ const AttendanceLiveSession = ({
 
         const [, userStream] = await Promise.all([
           loadModels(),
-          navigator.mediaDevices.getUserMedia({ video: true }),
+          navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+              frameRate: { ideal: 20 }
+            }
+          }),
         ]);
 
         stream = userStream;
@@ -111,6 +120,7 @@ const AttendanceLiveSession = ({
     return () => {
       isDetectingRef.current = false;
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+      if (blurWarningTimerRef.current) clearTimeout(blurWarningTimerRef.current);
       stopTimer();
       toastedIdsRef.current.clear();
       if (stream) stream.getTracks().forEach((t) => t.stop());
@@ -122,7 +132,7 @@ const AttendanceLiveSession = ({
     const canvas = canvasRef.current;
 
     let lastDetectionTime = 0;
-    const DETECTION_INTERVAL = 66; // ~15fps detection
+    const DETECTION_INTERVAL = 150; // ~15fps detection
 
     const processFrame = async (now) => {
       if (
@@ -149,7 +159,7 @@ const AttendanceLiveSession = ({
       try {
         detections = await faceapi.detectAllFaces(
           video,
-          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 })
+          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 })
         );
       } catch (err) {
         console.warn("Detection error:", err);
@@ -159,23 +169,28 @@ const AttendanceLiveSession = ({
 
       const width = video.videoWidth;
       const height = video.videoHeight;
-      canvas.width = width;
-      canvas.height = height;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
 
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, width, height);
-      ctx.save();
-      // Mirror canvas to match mirrored video display
-      ctx.scale(-1, 1);
-      ctx.translate(-width, 0);
+
 
       const facesToSend = [];
+      const BLUR_THRESHOLD = 120;
+
+      setFaceCount(detections.length);
 
       if (detections.length > 0) {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.translate(-width, 0);
+
         for (const detection of detections) {
           const box = detection.box;
-          const padding = 20;
-
+          const padding = Math.max(30, Math.round(box.width * 0.25));
           const x = Math.max(0, box.x - padding);
           const y = Math.max(0, box.y - padding);
           const boxW = Math.min(width - x, box.width + padding * 2);
@@ -183,25 +198,40 @@ const AttendanceLiveSession = ({
 
           if (boxW <= 1 || boxH <= 1) continue;
 
+          const blurScore = getBlurScore(video, x, y, boxW, boxH, width);
+          const isBlurry = blurScore < BLUR_THRESHOLD;
+
           // Draw bounding box
-          ctx.strokeStyle = "lime";
+          ctx.strokeStyle = isBlurry ? "orange" : "lime";
           ctx.lineWidth = 2;
           ctx.strokeRect(x, y, boxW, boxH);
 
           // Draw confidence score above box
-          const score = Math.round(detection.score * 100);
-          ctx.fillStyle = "lime";
+          const detScore = Math.round(detection.score * 100);
+          ctx.fillStyle = isBlurry ? "orange" : "lime";
           ctx.font = "12px monospace";
-          ctx.fillText(`${score}%`, x, y - 5);
+          ctx.fillText(
+            isBlurry ? `BLUR(${Math.round(blurScore)})` : `${detScore}%`,
+            x, y - 5
+          );
+
+          if (isBlurry) {
+            setBlurWarning(true);
+            if (blurWarningTimerRef.current) clearTimeout(blurWarningTimerRef.current);
+            blurWarningTimerRef.current = setTimeout(() => setBlurWarning(false), 2000);
+            continue;
+          }
 
           const face = cropFace(video, x, y, boxW, boxH, width);
           if (face) facesToSend.push(face);
         }
 
+        ctx.restore();
+
         // Unified throttle: send once per 500ms, only if not already processing
         if (facesToSend.length > 0 && !isProcessingFrame.current) {
           const nowMs = Date.now();
-          if (nowMs - lastSentRef.current > 500) {
+          if (nowMs - lastSentRef.current > 1500) {
             lastSentRef.current = nowMs;
             isProcessingFrame.current = true;
             sendFaces(facesToSend)
@@ -213,14 +243,40 @@ const AttendanceLiveSession = ({
         }
       }
 
-      ctx.restore();
-
       if (isDetectingRef.current) {
         rafIdRef.current = requestAnimationFrame(processFrame);
       }
     };
 
     rafIdRef.current = requestAnimationFrame(processFrame);
+  };
+
+  const getBlurScore = (video, x, y, w, h, videoWidth) => {
+    const tmp = document.createElement("canvas");
+    tmp.width = w;
+    tmp.height = h;
+    const ctx = tmp.getContext("2d");
+
+    // mirror-correct same as cropFace
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+    const mirroredX = videoWidth - (x + w);
+    ctx.drawImage(video, mirroredX, y, w, h, 0, 0, w, h);
+
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const pixels = imageData.data;
+
+    // Compute grayscale variance — low variance = blurry
+    let sum = 0, sumSq = 0, count = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const gray = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+      sum += gray;
+      sumSq += gray * gray;
+      count++;
+    }
+    const mean = sum / count;
+    const variance = (sumSq / count) - (mean * mean);
+    return variance;
   };
 
   const sendFaces = async (facesToSend) => {
@@ -346,7 +402,7 @@ const AttendanceLiveSession = ({
     const mirroredX = videoWidth - (x + boxW);
     ctx.drawImage(video, mirroredX, y, boxW, boxH, 0, 0, targetSize, targetSize);
 
-    return tmp.toDataURL("image/jpeg", 0.85);
+    return tmp.toDataURL("image/jpeg", 0.80);
   };
 
   const formatSemester = (sem) => {
@@ -358,8 +414,11 @@ const AttendanceLiveSession = ({
     return sem;
   };
 
+  const isStoppingRef = useRef(false);
+
   const handleStopSession = async () => {
     try {
+      isStoppingRef.current = true;
       setIsStopping(true);
       isDetectingRef.current = false;
 
@@ -409,6 +468,20 @@ const AttendanceLiveSession = ({
         <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-lg text-sm font-mono border border-white/20 shadow">
           ⏱ {elapsedTime}
         </div>
+
+        <div className={`absolute top-12 left-4 backdrop-blur-md px-3 py-1 rounded-lg text-sm font-mono border shadow transition-colors duration-300 ${
+          faceCount === 0
+            ? "bg-red-900/60 border-red-500/40 text-red-300"
+            : "bg-black/60 border-white/20 text-white"
+        }`}>
+          👤 {faceCount} face{faceCount !== 1 ? "s" : ""} detected
+        </div>
+
+        {blurWarning && (
+          <div className="absolute bottom-14 left-4 bg-orange-500/80 backdrop-blur-md px-3 py-1 rounded-lg text-xs font-semibold text-black border border-orange-300 shadow">
+            ⚠️ Face too blurry — move closer or improve lighting
+          </div>
+        )}
 
         <div className="absolute top-4 right-4">
           {instructorDetected ? (

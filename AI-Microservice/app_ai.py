@@ -135,8 +135,11 @@ def get_embedding():
 
         embeddings, boxes = [], []
         for f in faces:
-            if hasattr(f, "normed_embedding"):
-                embeddings.append(f.normed_embedding.tolist())
+            if hasattr(f, "embedding"):
+                emb = np.array(f.embedding, dtype=np.float32)
+                norm = np.linalg.norm(emb)
+                if norm > 1e-3:
+                    embeddings.append((emb / norm).tolist())
                 boxes.append([float(v) for v in f.bbox])
 
         print(f"/embed → generated {len(embeddings)} embeddings", flush=True)
@@ -224,45 +227,40 @@ def recognize_multi_route():
             return jsonify({"success": False, "error": "Missing faces list"}), 400
 
         recognized = []
-
         embeddings_list = []
         user_meta = []
 
         for r in registered_faces:
             emb = np.array(r.get("embedding"), dtype=np.float32)
-
             if emb.shape != (512,):
                 print(f"Invalid embedding shape: {emb.shape}", flush=True)
                 continue
-
             norm = np.linalg.norm(emb)
             if norm < 1e-3:
-                print("near-zero instructor/student embedding", flush=True)
+                print("near-zero registered embedding", flush=True)
                 continue
-
-            emb = emb / norm
-            embeddings_list.append(emb)
-
+            embeddings_list.append(emb / norm)
             user_meta.append({
                 "user_id": r.get("user_id"),
-                "type": r.get("type", "student")
+                "type": "instructor" if r.get("is_instructor") else r.get("type", "student")
             })
 
         if not embeddings_list:
-            print("No valid registered embeddings.", flush=True)
             return jsonify({"success": True, "recognized": []}), 200
 
         reg_embs = np.stack(embeddings_list, axis=0)
-
+        seen_user_ids = set()  # Fix 5
 
         for base64_image in faces:
 
-            img = read_b64_to_bgr(base64_image)
-            if img is None or img.size == 0 or np.mean(img) < 5:
+            # Fix 1 — decode once
+            img_bgr = read_b64_to_bgr(base64_image)
+            if img_bgr is None or img_bgr.size == 0 or np.mean(img_bgr) < 5:
                 print("Skipping invalid crop", flush=True)
                 continue
 
-            emb = get_face_embedding(img)
+            # Fix 2 — correct function (no internal flip)
+            emb = get_face_embedding(img_bgr)
             if emb is None:
                 print("No embedding extracted", flush=True)
                 continue
@@ -272,12 +270,11 @@ def recognize_multi_route():
                 print(f"Invalid face embedding dim: {emb.shape}", flush=True)
                 continue
 
+            # Fix 3 — sanity check only, don't re-normalize
             norm = np.linalg.norm(emb)
-            if norm < 1e-3:
-                print("zero norm embedding", flush=True)
+            if norm < 0.5:
+                print(f"Suspicious embedding norm: {norm:.4f}", flush=True)
                 continue
-
-            emb /= norm
 
             sims = np.dot(reg_embs, emb)
             best_idx = int(np.argmax(sims))
@@ -289,40 +286,38 @@ def recognize_multi_route():
 
             print(f"Match {user_type.upper()} {user_id} → cosine={best_score:.4f}")
 
-            if user_type == "instructor":
-                threshold = 0.30
-            else:
-                threshold = 0.32
-
+            # Fix 4 — raise thresholds
+            threshold = 0.40 if user_type == "instructor" else 0.42
             if best_score < threshold:
-                print("below threshold")
+                print(f"Below threshold ({best_score:.4f} < {threshold})", flush=True)
                 continue
 
-            img_bgr = read_b64_to_bgr(base64_image)  
-            is_real, confidence, probs = check_real_or_spoof(img_bgr) 
-            spoof_status = "Real" if is_real else "Spoof"  
+            # Fix 5 — skip duplicates
+            if user_id in seen_user_ids:
+                print(f"Duplicate skipped: {user_id}", flush=True)
+                continue
+            seen_user_ids.add(user_id)
+
+            # Fix 1 — reuse img_bgr, no second decode
+            is_real, confidence, probs = check_real_or_spoof(img_bgr)
+            spoof_status = "Real" if is_real else "Spoof"
 
             if spoof_status == "Spoof":
-                print(f"Face detected as SPOOF: {user_id} (Score: {best_score:.4f})")
-                continue 
+                print(f"SPOOF blocked: {user_id} (score={best_score:.4f})")
+                continue
 
             recognized.append({
                 "user_id": user_id,
                 "type": user_type,
                 "match_score": round(best_score, 4),
-                "spoof_status": spoof_status, 
-                "spoof_confidence": confidence,  
-                "real_prob": probs["real"], 
-                "spoof_prob": probs["spoof"] 
+                "spoof_status": spoof_status,
+                "spoof_confidence": confidence,
+                "real_prob": probs["real"],
+                "spoof_prob": probs["spoof"]
             })
 
-
         print(f"Recognized {len(recognized)} face(s)")
-
-        return jsonify({
-            "success": True,
-            "recognized": recognized
-        }), 200
+        return jsonify({"success": True, "recognized": recognized}), 200
 
     except Exception:
         print("Error in /recognize-multi:", traceback.format_exc())

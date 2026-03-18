@@ -283,10 +283,10 @@ function StudentRegisterFaceComponent() {
 
   // Uses face-api's yaw/pitch in degrees — much more accurate than ratio math
   const classifyAngle = (yaw, pitch) => {
-    if (yaw > 18)   return "left";   // face turned left
-    if (yaw < -18)  return "right";  // face turned right
-    if (pitch < -20) return "up";    // face tilted up
-    if (pitch > 22)  return "down";  // face tilted down
+    if (yaw > 18)   return "left";   
+    if (yaw < -18)  return "right";  
+    if (pitch < -20) return "up";   
+    if (pitch > 22)  return "down";  
     return "front";
   };
 

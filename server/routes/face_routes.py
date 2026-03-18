@@ -35,28 +35,38 @@ CACHE_TTL = 300
 
 SESSION_INSTRUCTOR_DETECTED = {}
 SESSION_LOGGED_STUDENTS = {}
+FACES_CACHE = {}
+FACES_CACHE_TTL = 120 
+CLASS_CACHE = {}
+CLASS_CACHE_TTL = 60
+STUDENT_CACHE = {}
+STUDENT_CACHE_TTL = 300
 
 # Helper: Cache Management
 def get_cached_faces(class_id):
+    now = time.time()
+    entry = FACES_CACHE.get(class_id)
+    
+    if entry and (now - entry["ts"]) < FACES_CACHE_TTL:
+        print(f"Cache hit for class {class_id} ({len(entry['data'])} embeddings)")
+        return entry["data"]
+
+    # Cache miss — fetch from DB
     cls = classes_collection.find_one({"_id": ObjectId(class_id)})
     if not cls:
         print("Class not found for embeddings.")
         return []
 
     registered = []
-
-    # LOAD STUDENTS ENROLLED IN THIS CLASS
     student_ids = [s["student_id"] for s in cls.get("students", [])]
 
     if student_ids:
         students = list(students_collection.find(
             {"student_id": {"$in": student_ids}, "embeddings": {"$exists": True}}
         ))
-
         for s in students:
             sid = s.get("student_id")
-            embeddings = s.get("embeddings", {})
-            for angle, vec in embeddings.items():
+            for angle, vec in s.get("embeddings", {}).items():
                 if isinstance(vec, list) and len(vec) == 512:
                     registered.append({
                         "user_id": sid,
@@ -65,14 +75,11 @@ def get_cached_faces(class_id):
                         "is_instructor": False
                     })
 
-    # LOAD INSTRUCTOR EMBEDDINGS
     instructor_id = cls.get("instructor_id")
-
     if instructor_id:
         instructor = instructors_collection.find_one(
             {"instructor_id": instructor_id, "embeddings": {"$exists": True}}
         )
-
         if instructor:
             for angle, vec in instructor.get("embeddings", {}).items():
                 if isinstance(vec, list) and len(vec) == 512:
@@ -82,12 +89,36 @@ def get_cached_faces(class_id):
                         "angle": angle,
                         "is_instructor": True
                     })
-            print(f"Loaded instructor embeddings for: {instructor_id}")
-        else:
-            print("Instructor has no embeddings yet.")
 
-    print(f"Loaded {len(registered)} embeddings (students + instructor) for class {class_id}")
+    FACES_CACHE[class_id] = {"data": registered, "ts": now}
+    print(f"Cache refreshed: {len(registered)} embeddings for class {class_id}")
     return registered
+
+def invalidate_faces_cache(class_id):
+    FACES_CACHE.pop(class_id, None)
+
+def get_cached_class(class_id):
+    now = time.time()
+    entry = CLASS_CACHE.get(class_id)
+    if entry and (now - entry["ts"]) < CLASS_CACHE_TTL:
+        return entry["data"]
+    try:
+        cls = classes_collection.find_one({"_id": ObjectId(class_id)})
+    except Exception:
+        return None
+    if cls:
+        CLASS_CACHE[class_id] = {"data": cls, "ts": now}
+    return cls
+
+def get_student_cached(user_id):
+    now = time.time()
+    entry = STUDENT_CACHE.get(user_id)
+    if entry and (now - entry["ts"]) < STUDENT_CACHE_TTL:
+        return entry["data"]
+    student = get_student_by_id(user_id)  # your existing imported function
+    if student:
+        STUDENT_CACHE[user_id] = {"data": student, "ts": now}
+    return student
 
 # REGISTER FACE
 @face_bp.route("/register-auto", methods=["POST"])
@@ -301,11 +332,9 @@ def multi_face_recognize():
         if not faces or not class_id:
             return jsonify({"error": "Missing faces or class_id"}), 400
 
+        # Fix 1 — cached, no DB hit if fresh
         registered_faces = get_cached_faces(class_id)
-        if not isinstance(registered_faces, list):
-            registered_faces = []
-
-        if len(registered_faces) == 0:
+        if not registered_faces:
             return jsonify({
                 "success": False,
                 "message": "No registered faces for this class",
@@ -313,7 +342,6 @@ def multi_face_recognize():
                 "instructor_detected": False
             }), 200
 
-        # Prepare payload for AI
         payload = {"faces": faces, "registered_faces": registered_faces}
 
         try:
@@ -324,19 +352,14 @@ def multi_face_recognize():
             )
             if hf_res.status_code != 200:
                 return jsonify({"error": "AI service failed"}), 500
-
             hf_result = hf_res.json()
         except Exception:
             return jsonify({"error": "AI service unreachable"}), 500
 
         recognized = hf_result.get("recognized") or []
 
-        # FETCH CLASS DOCUMENT
-        try:
-            cls = classes_collection.find_one({"_id": ObjectId(class_id)})
-        except Exception:
-            return jsonify({"error": "Invalid class_id"}), 400
-
+        # Fix 3 — use cached class doc
+        cls = get_cached_class(class_id)
         if not cls:
             return jsonify({"error": "Class not found"}), 404
 
@@ -346,7 +369,6 @@ def multi_face_recognize():
         if not log_id_raw:
             return jsonify({"error": "No active attendance log for this class"}), 400
 
-        # Convert to ObjectId
         try:
             log_id = ObjectId(str(log_id_raw))
         except Exception:
@@ -373,24 +395,25 @@ def multi_face_recognize():
                 "subject_title": cls.get("subject_title"),
                 "year_level": cls.get("year_level"),
             }
-
-            inserted = attendance_collection.insert_one(new_log)
-            new_log_id = str(inserted.inserted_id)
-
-            # Update class with new active log
-            classes_collection.update_one(
-                {"_id": ObjectId(class_id)},
-                {"$set": {"active_session_log_id": new_log_id}}
-            )
-
-            SESSION_LOGGED_STUDENTS[class_id] = {}
-            SESSION_INSTRUCTOR_DETECTED[class_id] = {
-                "log_id": new_log_id,
-                "detected": False
-            }
-
-            att_log = new_log
-            log_id = ObjectId(new_log_id)
+            try:
+                inserted = attendance_collection.insert_one(new_log)  # Fix 5
+                new_log_id = str(inserted.inserted_id)
+            except Exception:
+                att_log = attendance_collection.find_one({"_id": log_id})
+                if not att_log:
+                    return jsonify({"error": "Failed to create attendance log"}), 500
+            else:
+                classes_collection.update_one(
+                    {"_id": ObjectId(class_id)},
+                    {"$set": {"active_session_log_id": new_log_id}}
+                )
+                SESSION_LOGGED_STUDENTS[class_id] = {}
+                SESSION_INSTRUCTOR_DETECTED[class_id] = {
+                    "log_id": new_log_id,
+                    "detected": False
+                }
+                att_log = new_log
+                log_id = ObjectId(new_log_id)
 
         now = datetime.now(PH_TZ)
         now_time = now.strftime("%H:%M:%S")
@@ -409,7 +432,7 @@ def multi_face_recognize():
         instructor_detected = SESSION_INSTRUCTOR_DETECTED[class_id]["detected"]
         results = []
 
-        if len(recognized) == 0:
+        if not recognized:
             return jsonify({
                 "success": True,
                 "logged": [],
@@ -424,23 +447,22 @@ def multi_face_recognize():
 
         for face in recognized:
             user_id = str(face.get("user_id") or "")
-            is_instructor = face.get("is_instructor", False)
-            bbox = face.get("bbox")
+            if not user_id:
+                continue
 
+            # Fix 4 — derive is_instructor from "type" field
+            is_instructor = face.get("type") == "instructor" or face.get("is_instructor", False)
+            bbox = face.get("bbox")
             match_score = face.get("match_score")
             spoof_status = face.get("spoof_status")
             spoof_confidence = face.get("spoof_confidence")
             real_prob = face.get("real_prob")
             spoof_prob = face.get("spoof_prob")
 
-            if not user_id:
-                continue
-
             if is_instructor or user_id == instructor_id:
                 if spoof_status == "Spoof" or (spoof_confidence is not None and spoof_confidence < 0.70):
                     print(f"Instructor SPOOF BLOCKED: {instructor_id} | confidence={spoof_confidence}")
                     continue
-
                 SESSION_INSTRUCTOR_DETECTED[class_id] = {
                     "log_id": str(log_id),
                     "detected": True
@@ -448,26 +470,21 @@ def multi_face_recognize():
                 instructor_detected = True
                 continue
 
-            student = get_student_by_id(user_id)
+            # Fix 2 — cached student lookup
+            student = get_student_cached(user_id)
             if not student:
                 continue
 
             stud_id = str(student.get("student_id"))
             first = student.get("first_name") or student.get("First_Name", "")
             last = student.get("last_name") or student.get("Last_Name", "")
-
-            student_data = {
-                "student_id": stud_id,
-                "first_name": first,
-                "last_name": last,
-            }
+            student_data = {"student_id": stud_id, "first_name": first, "last_name": last}
 
             cache_entry = SESSION_LOGGED_STUDENTS[class_id].get(user_id)
             if cache_entry and cache_entry.get("log_id") == str(log_id):
-                prev_status = cache_entry["status"]
                 results.append({
                     **student_data,
-                    "status": prev_status,
+                    "status": cache_entry["status"],
                     "time": now_readable,
                     "bbox": bbox,
                     "match_score": match_score,
@@ -485,69 +502,45 @@ def multi_face_recognize():
 
             if existing and existing.get("students"):
                 status = existing["students"][0]["status"]
-
                 SESSION_LOGGED_STUDENTS[class_id][user_id] = {
-                    "status": status,
-                    "log_id": str(log_id),
+                    "status": status, "log_id": str(log_id)
                 }
-
                 results.append({
-                    **student_data,
-                    "status": status,
-                    "time": now_readable,
-                    "bbox": bbox,
-                    "match_score": match_score,
-                    "spoof_status": spoof_status,
-                    "spoof_confidence": spoof_confidence,
-                    "real_prob": real_prob,
-                    "spoof_prob": spoof_prob
-                    
+                    **student_data, "status": status, "time": now_readable,
+                    "bbox": bbox, "match_score": match_score,
+                    "spoof_status": spoof_status, "spoof_confidence": spoof_confidence,
+                    "real_prob": real_prob, "spoof_prob": spoof_prob
                 })
                 continue
 
             try:
-                class_start = att_log["start_time"]
-                class_dt = datetime.strptime(class_start, "%H:%M:%S").replace(
+                class_dt = datetime.strptime(att_log["start_time"], "%H:%M:%S").replace(
                     year=now.year, month=now.month, day=now.day
                 )
-                mins_late = (now - class_dt).total_seconds() / 60
-                status = "Late" if mins_late > 15 else "Present"
+                status = "Late" if (now - class_dt).total_seconds() / 60 > 15 else "Present"
             except Exception:
                 status = "Present"
 
             attendance_collection.update_one(
                 {"_id": log_id},
                 {
-                    "$push": {
-                        "students": {
-                            "student_id": stud_id,
-                            "first_name": first,
-                            "last_name": last,
-                            "status": status,
-                            "time": now_time
-                        }
-                    },
+                    "$push": {"students": {
+                        "student_id": stud_id, "first_name": first,
+                        "last_name": last, "status": status, "time": now_time
+                    }},
                     "$set": {"end_time": now_time}
                 }
             )
 
             SESSION_LOGGED_STUDENTS[class_id][user_id] = {
-                "status": status,
-                "log_id": str(log_id),
+                "status": status, "log_id": str(log_id)
             }
-
             results.append({
-                **student_data,
-                "status": status,
-                "time": now_readable,
-                "bbox": bbox,
-                "match_score": match_score,
-                "spoof_status": spoof_status,
-                "spoof_confidence": spoof_confidence,
-                "real_prob": real_prob,
-                "spoof_prob": spoof_prob
+                **student_data, "status": status, "time": now_readable,
+                "bbox": bbox, "match_score": match_score,
+                "spoof_status": spoof_status, "spoof_confidence": spoof_confidence,
+                "real_prob": real_prob, "spoof_prob": spoof_prob
             })
-
 
         duration = time.time() - start_time
         current_app.logger.info(
