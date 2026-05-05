@@ -12,6 +12,7 @@ allowed_origins = [
     "http://localhost:5173",
     "https://face-recognition-attendance-monitor.vercel.app",
     "https://meuorii-face-recognition-attendance.hf.space",
+    "https://capstone-frams.vercel.app",
 ]
 
 CORS(
