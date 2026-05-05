@@ -250,16 +250,17 @@ const ClassManagementComponent = () => {
             </h3>
 
             {/* TABLE */}
-            <div className="overflow-x-auto rounded-2xl border border-neutral-800 shadow-lg shadow-black/30">
+            <div className="w-full overflow-hidden rounded-2xl border border-neutral-800 shadow-lg shadow-black/30">
 
               <table className="w-full table-fixed text-sm">
 
                 <colgroup>
                   <col className="w-[10%]" />
-                  <col className="w-[30%]" />
-                  <col className="w-[20%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[20%]" />
+                  <col className="w-[24%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[18%]" />
                   <col className="w-[14%]" />
                 </colgroup>
 
@@ -269,6 +270,7 @@ const ClassManagementComponent = () => {
                     <th className="px-4 text-left">Title</th>
                     <th className="px-4 text-left">Instructor</th>
                     <th className="px-4 text-left">Section</th>
+                    <th className="px-4 text-center">Students</th>
                     <th className="px-4 text-left">Schedule</th>
                     <th className="px-4 text-center">Actions</th>
                   </tr>
@@ -278,7 +280,7 @@ const ClassManagementComponent = () => {
 
                   {loading && (
                     <tr>
-                      <td colSpan="6" className="text-center py-8 text-neutral-500">
+                      <td colSpan="7" className="text-center py-8 text-neutral-500">
                         Loading classes...
                       </td>
                     </tr>
@@ -291,9 +293,18 @@ const ClassManagementComponent = () => {
                         className="h-14 align-middle odd:bg-neutral-950 even:bg-neutral-900/20 hover:bg-neutral-800/40 transition border-b border-neutral-800/70"
                       >
                         <td className="px-4 font-mono text-emerald-400">{cls.subject_code}</td>
-                        <td className="px-4 font-medium truncate max-w-[250px]">{cls.subject_title}</td>
-                        <td className="px-4">{cls.instructor_first_name} {cls.instructor_last_name}</td>
+                        <td className="px-4 font-medium truncate" title={cls.subject_title}>
+                          {cls.subject_title}
+                        </td>
+                        <td className="px-4 truncate whitespace-nowrap" title={`${cls.instructor_first_name} ${cls.instructor_last_name}`}>
+                          {cls.instructor_first_name} {cls.instructor_last_name}
+                        </td>
                         <td className="px-4 font-semibold">{cls.section}</td>
+                        <td className="px-4 text-center">
+                          <span className="px-2 py-1 rounded-full bg-emerald-900/40 text-emerald-400 border border-emerald-500/20 font-medium">
+                            {cls.students?.length || 0}
+                          </span>
+                        </td>
 
                         {/* SCHEDULE CELL */}
                         <td className="px-4 py-3 text-neutral-300">
@@ -324,8 +335,8 @@ const ClassManagementComponent = () => {
                         </td>
 
                         {/* ACTION BUTTONS */}
-                        <td className="px-4">
-                          <div className="flex items-center justify-center gap-4 px-2">
+                        <td className="px-2">
+                          <div className="flex items-center justify-center gap-2">
 
                             <button
                               onClick={() => setSelectedClass(cls)}
