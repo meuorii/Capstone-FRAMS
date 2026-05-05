@@ -3,18 +3,12 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+
 import ViewStudentModal from "./StudentManagement/ViewStudentModal";
 import EditStudentModal from "./StudentManagement/EditStudentModal";
 import DeleteConfirmationModal from "./StudentManagement/DeleteConfirmationModal";
-import { 
-  Search, 
-  UserPlus, 
-  Eye, 
-  Edit3, 
-  Trash2, 
-  GraduationCap, 
-  LayoutGrid
-} from "lucide-react";
+
+import { FaUsers, FaPlus, FaSearch } from "react-icons/fa";
 
 const API_URL = "http://127.0.0.1:8080";
 
@@ -137,145 +131,120 @@ const StudentManagementComponent = () => {
   const totalStudents = filteredStudents.length;
 
   return (
-    <div className="min-h-screen bg-[#050505] p-6 lg:p-12 text-white">
-      <div className="max-w-7xl mx-auto space-y-12">
-        
-        {/* Header & Controls */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-8">
-          <div className="space-y-2">
-            <h2 className="text-4xl font-black bg-gradient-to-br from-white via-neutral-200 to-neutral-500 bg-clip-text text-transparent tracking-tighter flex items-center gap-4">
-              Student <span className="text-emerald-500">Registry</span>
-            </h2>
-            <p className="text-neutral-500 text-sm font-medium tracking-[0.2em] uppercase">
-              Manage Academic Profiles & Biometric Data
-            </p>
+    <div className="bg-neutral-950 p-8 rounded-2xl shadow-xl text-white space-y-8">
+      
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between md:items-center gap-6">
+        <h2 className="text-3xl font-extrabold flex items-center gap-3">
+          <FaUsers className="text-emerald-400" />
+          <span className="bg-gradient-to-r from-emerald-400 to-green-600 text-transparent bg-clip-text">
+            Student Management
+          </span>
+        </h2>
+
+        {/* Controls */}
+        <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+
+          {/* Search */}
+          <div className="relative flex-1">
+            <FaSearch className="absolute left-3 top-3 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search ID or Name"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-neutral-900 rounded-lg text-sm border border-neutral-700 focus:ring-2 focus:ring-emerald-500"
+            />
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
-            {/* Enhanced Search */}
-            <div className="relative group flex-1 sm:w-80">
-              <div className="absolute -inset-0.5 bg-emerald-500/20 rounded-2xl blur opacity-0 group-focus-within:opacity-100 transition duration-500"></div>
-              <div className="relative flex items-center bg-neutral-900/50 border border-white/5 rounded-2xl px-5 py-3.5 backdrop-blur-xl">
-                <Search className="text-neutral-500 mr-3" size={18} />
-                <input
-                  type="text"
-                  placeholder="Search ID or Name..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-transparent outline-none text-sm text-neutral-200 w-full placeholder-neutral-600 font-medium"
-                />
-              </div>
-            </div>
-
-            {/* Register Button */}
-            <button
-              onClick={() => navigate("/student/register")}
-              className="flex items-center justify-center gap-2.5 px-6 py-3.5 bg-emerald-600 text-white hover:bg-emerald-500 hover:text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl transition-all duration-300 active:scale-95"
-            >
-              <UserPlus size={16} strokeWidth={3} />
-              Register Student
-            </button>
-          </div>
-        </div>
-
-        {/* Summary Analytics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="relative group overflow-hidden p-8 bg-neutral-900/20 border border-white/5 rounded-[2rem] backdrop-blur-sm">
-            <div className="relative z-10 flex items-center justify-between">
-              <div>
-                <p className="text-neutral-500 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Total Enrollment</p>
-                <p className="text-4xl font-black tracking-tighter text-white">{totalStudents}</p>
-              </div>
-              <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-emerald-500/20">
-                <GraduationCap size={24} />
-              </div>
-            </div>
-            <div className="absolute -bottom-6 -right-6 text-white/[0.02] group-hover:text-emerald-500/[0.03] transition-colors">
-              <GraduationCap size={120} strokeWidth={1} />
-            </div>
-          </div>
-          {/* Add more stats cards here if needed */}
-        </div>
-
-        {/* Modern Student Table */}
-        <div className="bg-neutral-900/20 rounded-[2rem] border border-white/5 overflow-hidden backdrop-blur-sm shadow-2xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-separate border-spacing-0">
-              <thead>
-                <tr className="bg-white/[0.02]">
-                  <th className="px-8 py-6 text-neutral-500 text-[11px] uppercase tracking-[0.2em] font-bold border-b border-white/5">Identity</th>
-                  <th className="px-8 py-6 text-neutral-500 text-[11px] uppercase tracking-[0.2em] font-bold border-b border-white/5">Full Name</th>
-                  <th className="px-8 py-6 text-neutral-500 text-[11px] uppercase tracking-[0.2em] font-bold border-b border-white/5">Academic Program</th>
-                  <th className="px-8 py-6 text-neutral-500 text-[11px] uppercase tracking-[0.2em] font-bold border-b border-white/5 text-center">Management</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-white/[0.03]">
-                {filteredStudents.length > 0 ? (
-                  filteredStudents.map((s) => (
-                    <tr key={s.student_id} className="group hover:bg-white/[0.02] transition-all duration-300">
-                      <td className="px-8 py-5">
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono text-sm text-neutral-500 tracking-tighter">{s.student_id}</span>
-                        </div>
-                      </td>
-                      <td className="px-8 py-5">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-bold text-neutral-200 group-hover:text-white transition-colors">
-                            {formatName(s.last_name)}, {formatName(s.first_name)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-8 py-5">
-                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/5 border border-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
-                          <LayoutGrid size={10} />
-                          {s.course}
-                        </div>
-                      </td>
-                      <td className="px-8 py-5">
-                        <div className="flex gap-2 justify-center">
-                          <button
-                            onClick={() => handleView(s)}
-                            className="p-2.5 rounded-xl bg-neutral-900 border border-white/5 text-neutral-400 hover:text-white hover:border-blue-500/50 transition-all"
-                            title="View Profile"
-                          >
-                            <Eye size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleEdit(s)}
-                            className="p-2.5 rounded-xl bg-neutral-900 border border-white/5 text-neutral-400 hover:text-white hover:border-yellow-500/50 transition-all"
-                            title="Edit Details"
-                          >
-                            <Edit3 size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteRequest(s)}
-                            className="p-2.5 rounded-xl bg-neutral-900 border border-white/5 text-neutral-400 hover:text-rose-500 hover:border-rose-500/50 transition-all"
-                            title="Remove Record"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan="4" className="px-8 py-20 text-center text-neutral-600 font-medium italic text-sm">
-                      No matching student records found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          {/* Register Student */}
+          <button
+            onClick={() => navigate("/student/register")}
+            className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold shadow-md transition-transform hover:scale-105"
+          >
+            <FaPlus /> Register Student
+          </button>
         </div>
       </div>
 
-      {/* Modals remain the same but will inherit the premium styles from their components */}
-      <ViewStudentModal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} student={selectedStudent} />
-      <EditStudentModal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} student={selectedStudent} onStudentUpdated={handleStudentUpdated} />
-      <DeleteConfirmationModal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} onConfirm={confirmDelete} student={selectedStudent} />
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="p-5 bg-neutral-900 rounded-xl border border-neutral-800 shadow">
+          <p className="text-gray-400 text-sm">Total Students</p>
+          <p className="text-3xl font-bold text-emerald-400">{totalStudents}</p>
+        </div>
+      </div>
+
+      {/* Student Table */}
+      <div className="rounded-xl overflow-hidden border border-neutral-800 bg-neutral-900 shadow-lg">
+        <div className="hidden md:grid grid-cols-5 bg-neutral-800 text-emerald-300 text-sm font-semibold uppercase tracking-wide border-b border-neutral-700">
+          <div className="px-4 py-3">ID</div>
+          <div className="px-4 py-3">First</div>
+          <div className="px-4 py-3">Last</div>
+          <div className="px-4 py-3">Course</div>
+          <div className="px-4 py-3 text-center">Actions</div>
+        </div>
+
+        {filteredStudents.length > 0 ? (
+          filteredStudents.map((s) => (
+            <div
+              key={s.student_id}
+              className="border-b border-neutral-800 hover:bg-neutral-800/70 transition"
+            >
+              <div className="hidden md:grid grid-cols-5 text-sm text-gray-300">
+                <div className="px-4 py-3 font-mono text-gray-400">{s.student_id}</div>
+                <div className="px-4 py-3">{formatName(s.first_name)}</div>
+                <div className="px-4 py-3">{formatName(s.last_name)}</div>
+                <div className="px-4 py-3 text-emerald-300 font-medium">{s.course}</div>
+
+                <div className="px-4 py-3 flex gap-2 justify-center">
+                  <button
+                    onClick={() => handleView(s)}
+                    className="px-3 py-1 rounded-md bg-blue-500/20 text-blue-400 text-xs hover:bg-blue-500/30"
+                  >
+                    View
+                  </button>
+                  <button
+                    onClick={() => handleEdit(s)}
+                    className="px-3 py-1 rounded-md bg-yellow-500/20 text-yellow-400 text-xs hover:bg-yellow-500/30"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteRequest(s)}
+                    className="px-3 py-1 rounded-md bg-red-500/20 text-red-400 text-xs hover:bg-red-500/30"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="text-center text-gray-500 py-6">No students found.</div>
+        )}
+      </div>
+
+      {/* Modals */}
+      <ViewStudentModal
+        isOpen={isViewModalOpen}
+        onClose={() => setIsViewModalOpen(false)}
+        student={selectedStudent}
+      />
+
+      <EditStudentModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        student={selectedStudent}
+        onStudentUpdated={handleStudentUpdated}
+      />
+
+      <DeleteConfirmationModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={confirmDelete}
+        student={selectedStudent}
+      />
     </div>
   );
 };
