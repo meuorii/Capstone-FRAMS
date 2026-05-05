@@ -20,14 +20,16 @@ def get_face_angle(landmarks, w, h):
         nose_y = nose.y * h
         eye_mid_y = ((left_eye.y + right_eye.y) / 2) * h
         mouth_y = mouth.y * h
+
         eye_dist = right_eye.x - left_eye.x
         nose_pos = (nose.x - left_eye.x) / (eye_dist + 1e-6)
-        up_down_ratio = (nose_y - eye_mid_y) / (mouth_y - nose_y + 1e-6)
-        if nose_pos < 0.35:
+        up_down_ratio = abs(nose_y - eye_mid_y) / (abs(mouth_y - nose_y) + 1e-6)
+
+        if nose_pos > 0.65: 
             return "right"
-        elif nose_pos > 0.75:
+        elif nose_pos < 0.35:
             return "left"
-        elif up_down_ratio > 1.4:
+        elif up_down_ratio > 1.6:
             return "down"
         elif up_down_ratio < 0.55:
             return "up"
@@ -41,12 +43,15 @@ def register_face_auto(data):
         student_id = data.get("student_id")
         base64_image = data.get("image")
         angle_from_frontend = data.get("angle")
+
+        # --- Input validation ---
         if not student_id or not base64_image:
             return {"success": False, "error": "Missing student_id or image"}
 
         if not base64_image.startswith("data:image"):
             return {"success": False, "error": "Invalid image format"}
 
+        # --- Decode image ---
         try:
             img_bytes = base64.b64decode(base64_image.split(",")[1])
             img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -55,63 +60,73 @@ def register_face_auto(data):
         except Exception as e:
             logging.warning(f"Base64 decoding error: {str(e)}")
             return {"success": False, "error": "Invalid image format"}
+
+        # --- FaceMesh: detect face and get angle ---
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb)
-        if not results.multi_face_landmarks:
-            logging.warning("No face detected by FaceMesh.")
-            return {"success": False, "error": "No face detected"}
-        
-        h, w = img.shape[:2]
-        landmarks = results.multi_face_landmarks[0].landmark
-        angle = angle_from_frontend or get_face_angle(landmarks, w, h)
-        logging.info(f"Detected angle: {angle}")
-        if angle.lower() == "down":
-            logging.info("Enhancing image for better DOWN-angle detection...")
+
+        angle = (angle_from_frontend or "unknown").lower()
+
+        if results.multi_face_landmarks:
+            h, w = img.shape[:2]
+            landmarks = results.multi_face_landmarks[0].landmark
+            detected_angle = get_face_angle(landmarks, w, h).lower()
+            if angle == "unknown":
+                angle = detected_angle
+        elif not angle_from_frontend:
+            logging.warning(f"[{student_id}] No face detected by FaceMesh and no frontend angle provided.")
+            return {"success": False, "error": "No face detected", "angle": "unknown"}
+
+        logging.info(f"[{student_id}] Detected angle: {angle}")
+
+        # --- Per-angle image enhancement ---
+        if angle in ("down", "right"):
+            logging.info(f"[{student_id}] Enhancing image for {angle.upper()} angle...")
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             enhanced = cv2.convertScaleAbs(enhanced, alpha=1.3, beta=25)
             img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-            y_start = int(h * 0.15)
-            y_end = int(h * 0.85)
-            img = img[y_start:y_end, :]
-            logging.info("Image enhanced for DOWN angle.")
-        if angle.lower() == "right":
-            logging.info("Enhancing image for better RIGHT-angle detection...")
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-            enhanced = clahe.apply(gray)
-            enhanced = cv2.convertScaleAbs(enhanced, alpha=1.3, beta=25)
-            img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-            logging.info("Image enhanced for RIGHT angle.")
+
+        # --- ArcFace model check ---
         if face_model is None:
+            logging.error("Face model is not initialized.")
             return {"success": False, "error": "Face model not initialized"}
 
-        img = cv2.resize(img, (112, 112))
-        faces = face_model.get(img)
+        # --- ArcFace: extract embedding ---
+        # Use original image for detection as it's more accurate than 112x112 resize
+        faces = face_model.get(img) 
+
+        # Fix 3: Return success=False on no detection — clear failure signal
         if not faces:
-            logging.warning(f"No faces detected by ArcFace model for {angle}. Image might be blurry or out of frame.")
+            logging.warning(f"[{student_id}] ArcFace found no faces for angle: {angle}. Image may be blurry or out of frame.")
             return {
-                "success": True,
-                "warning": f"Weak capture for {angle}. No embedding generated.",
-                "student_id": student_id,
+                "success": False,
+                "error": f"No face detected by model for angle: {angle}",
                 "angle": angle,
-                "embeddings": {},
             }
 
         if not hasattr(faces[0], "embedding"):
-            logging.warning(f"No valid embedding extracted for {angle}.")
+            logging.warning(f"[{student_id}] ArcFace returned no embedding for angle: {angle}.")
             return {
-                "success": True,
-                "warning": f"Weak embedding for {angle}",
-                "student_id": student_id,
+                "success": False,
+                "error": f"Could not extract embedding for angle: {angle}",
                 "angle": angle,
-                "embeddings": {},
             }
 
+        # --- Normalize embedding ---
         embedding = np.array(faces[0].embedding, dtype=np.float32)
-        embedding = embedding / np.linalg.norm(embedding)
-        logging.info(f"{student_id} | Angle: {angle} | Embedding Norm: {np.linalg.norm(embedding):.4f}")
+        norm = np.linalg.norm(embedding)
+        if norm == 0:
+            logging.warning(f"[{student_id}] Zero-norm embedding for angle: {angle}.")
+            return {
+                "success": False,
+                "error": f"Invalid embedding (zero norm) for angle: {angle}",
+                "angle": angle,
+            }
+
+        embedding = embedding / norm
+        logging.info(f"[{student_id}] | Angle: {angle} | Embedding norm: {np.linalg.norm(embedding):.4f}")
 
         return {
             "success": True,
@@ -123,7 +138,7 @@ def register_face_auto(data):
         }
 
     except Exception as e:
-        logging.error(f"register_face_auto() Exception: {str(e)}")
+        logging.error(f"[register_face_auto] Exception for student_id={data.get('student_id')}: {str(e)}")
         return {"success": False, "error": "Internal server error"}
 
 
@@ -143,16 +158,21 @@ def register_instructor_face(data):
 
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb)
-        if not results.multi_face_landmarks:
-            logging.warning("No face detected by FaceMesh.")
+
+        angle = (angle_from_frontend or "unknown").lower()
+
+        if results.multi_face_landmarks:
+            h, w = img.shape[:2]
+            landmarks = results.multi_face_landmarks[0].landmark
+            detected_angle = get_face_angle(landmarks, w, h).lower()
+            if angle == "unknown":
+                angle = detected_angle
+        elif not angle_from_frontend:
+            logging.warning("No face detected by FaceMesh and no frontend angle provided.")
             return {"success": False, "error": "No face detected"}
 
-        h, w = img.shape[:2]
-        landmarks = results.multi_face_landmarks[0].landmark
-        angle = angle_from_frontend or get_face_angle(landmarks, w, h)
         logging.info(f"Detected angle: {angle}")
 
-        img = cv2.resize(img, (112, 112))
         faces = face_model.get(img)
         if not faces:
             logging.warning(f"No faces detected by ArcFace model for {angle}. Image might be blurry or out of frame.")

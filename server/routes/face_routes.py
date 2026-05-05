@@ -135,7 +135,7 @@ def register_auto():
             }), 400
 
         course = (data.get("Course") or data.get("course") or "").strip().upper() or "UNKNOWN"
-        data["course"] = course  
+        data["course"] = course
         current_app.logger.info(f"Preserved course for {student_id}: {course}")
 
         hf_start = time.time()
@@ -150,77 +150,63 @@ def register_auto():
             }), res.status_code
 
         hf_result = res.json()
-        if not hf_result.get("success") or not hf_result.get("embeddings"):
-            warning_msg = (
-                hf_result.get("warning") or
-                hf_result.get("error") or
-                "No embeddings returned"
-            )
+
+        if not hf_result.get("success"):
+            error_msg = hf_result.get("error") or hf_result.get("warning") or "No embeddings returned"
+            current_app.logger.warning(f"HF returned failure for {student_id}: {error_msg}")
             return jsonify({
                 "success": False,
-                "warning": warning_msg,
+                "error": error_msg,
                 "angle": hf_result.get("angle", "unknown"),
             }), 200
 
-        normalized_embeddings = {}
-        for angle, vec in hf_result["embeddings"].items():
-            v = np.array(vec, dtype=np.float32)
-            norm = np.linalg.norm(v)
-            if norm > 0:
-                normalized_embeddings[angle] = (v / norm).tolist()
+        angle = hf_result.get("angle", "unknown")
+        embeddings = hf_result.get("embeddings", {})
 
-        student_doc = students_collection.find_one_and_update(
+        if not embeddings or angle not in embeddings:
+            return jsonify({
+                "success": False,
+                "error": f"No embedding returned for angle: {angle}",
+                "angle": angle,
+            }), 200
+
+        embedding_for_angle = embeddings[angle]
+        students_collection.find_one_and_update(
             {"student_id": student_id},
             {
                 "$setOnInsert": {
+                    "created_at": datetime.utcnow(),
+                },
+                "$set": {
                     "student_id": student_id,
                     "First_Name": data.get("First_Name"),
                     "Middle_Name": data.get("Middle_Name"),
                     "Last_Name": data.get("Last_Name"),
                     "Suffix": data.get("Suffix"),
                     "Course": course,
-                    "registered": False,
-                    "created_at": datetime.utcnow(),
+                    "registered": True,
+                    f"embeddings.{angle}": embedding_for_angle,  # merge per angle, not full overwrite
+                    "updated_at": datetime.utcnow(),
                 }
             },
-            upsert=True,
-            return_document=ReturnDocument.AFTER, 
+            upsert=True
         )
-
-        update_fields = {
-            "student_id": student_id,
-            "First_Name": data.get("First_Name") or student_doc.get("First_Name"),
-            "Middle_Name": data.get("Middle_Name") or student_doc.get("Middle_Name"),
-            "Last_Name": data.get("Last_Name") or student_doc.get("Last_Name"),
-            "Suffix": data.get("Suffix") or student_doc.get("Suffix"),
-            "Course": course,
-            "registered": True,
-            "embeddings": normalized_embeddings,
-            "updated_at": datetime.utcnow(),
-        }
-
-
-        students_collection.update_one(
-            {"student_id": student_id},
-            {"$set": {"Course": course}}
-        )
-
-        executor.submit(save_face_data, student_id, update_fields)
 
         total_elapsed = time.time() - start_time
         current_app.logger.info(
-            f" /register-auto {student_id} done in {total_elapsed:.2f}s (HF={hf_elapsed:.2f}s)"
+            f"/register-auto {student_id} | angle={angle} | done in {total_elapsed:.2f}s (HF={hf_elapsed:.2f}s)"
         )
 
         return jsonify({
             "success": True,
             "student_id": student_id,
             "Course": course,
-            "angle": hf_result.get("angle", "unknown"),
-            "message": "Registration successful and saved.",
+            "angle": angle,
+            "message": f"Face registered successfully for angle: {angle}",
         }), 200
 
     except requests.exceptions.Timeout:
+        current_app.logger.error(f"/register-auto timeout for student_id={data.get('student_id')}")
         return jsonify({
             "success": False,
             "error": "AI service timeout"
@@ -228,7 +214,7 @@ def register_auto():
 
     except Exception as e:
         current_app.logger.error(
-            f" /register-auto error: {str(e)}\n{traceback.format_exc()}"
+            f"/register-auto error: {str(e)}\n{traceback.format_exc()}"
         )
         return jsonify({
             "success": False,

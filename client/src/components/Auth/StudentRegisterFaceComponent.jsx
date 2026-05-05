@@ -34,6 +34,11 @@ function StudentRegisterFaceComponent() {
   const faceDetectedRef = useRef(false);
   const angleStatusRef = useRef({});
   const formDataRef = useRef({});
+  const adminCourseRef = useRef("");
+
+  // Fix 3: refs to guard state setters — prevent re-render every frame
+  const currentAngleRef = useRef(null);
+  const faceDetectedStateRef = useRef(false);
 
   const [modelsReady, setModelsReady] = useState(false);
   const [angleStatus, setAngleStatus] = useState({});
@@ -52,24 +57,22 @@ function StudentRegisterFaceComponent() {
     Course: "",
   });
 
-  // Keep refs in sync
-  useEffect(() => { formDataRef.current = formData; }, [formData]);
-  useEffect(() => { isCapturingRef.current = isCapturing; }, [isCapturing]);
-  useEffect(() => { targetAngleRef.current = targetAngle; }, [targetAngle]);
-  useEffect(() => { faceDetectedRef.current = faceDetected; }, [faceDetected]);
-  useEffect(() => { angleStatusRef.current = angleStatus; }, [angleStatus]);
+  // Fix 1: Removed all 5 ref-sync useEffects.
+  // Refs are updated directly in their respective setters below.
 
   // Re-register prefill
   useEffect(() => {
     if (IS_REREGISTER) {
-      setFormData({
+      const prefilled = {
         Student_ID: reRegData.student_id || "",
         First_Name: reRegData.first_name || "",
         Middle_Name: reRegData.middle_name || "",
         Last_Name: reRegData.last_name || "",
         Suffix: reRegData.suffix || "",
         Course: reRegData.course || "",
-      });
+      };
+      setFormData(prefilled);
+      formDataRef.current = prefilled;
       toast.info("Re-register mode: Student details loaded.");
     }
   }, []);
@@ -84,8 +87,13 @@ function StudentRegisterFaceComponent() {
           headers: { Authorization: `Bearer ${token}` },
         });
         const program = res.data.program || "Unknown Program";
+        adminCourseRef.current = program;
         setAdminCourse(program);
-        setFormData((prev) => ({ ...prev, Course: program }));
+        setFormData((prev) => {
+          const updated = { ...prev, Course: program };
+          formDataRef.current = updated;
+          return updated;
+        });
       } catch (err) {
         console.error(err);
         toast.error("Failed to fetch admin program.");
@@ -126,7 +134,6 @@ function StudentRegisterFaceComponent() {
         video.srcObject = stream;
         await video.play();
 
-        // Wait for video dimensions
         await new Promise((resolve) => {
           const check = setInterval(() => {
             if (video.videoWidth > 0 && video.videoHeight > 0) {
@@ -168,8 +175,9 @@ function StudentRegisterFaceComponent() {
       if (!isMounted || !modelsLoadedRef.current) return;
 
       frameCount++;
-      // Process every 2nd frame
-      if (frameCount % 2 !== 0) {
+
+      // Fix 5: Process every 3rd frame (~10 detections/sec) instead of every 2nd
+      if (frameCount % 3 !== 0) {
         animationIdRef.current = requestAnimationFrame(detect);
         return;
       }
@@ -182,7 +190,10 @@ function StudentRegisterFaceComponent() {
 
       try {
         const detection = await faceapi
-          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }))
+          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ 
+            scoreThreshold: 0.4, // Improved persistence at angles
+            inputSize: 320       // Better detection accuracy for tilted faces
+          }))
           .withFaceLandmarks();
 
         processDetection(detection, video);
@@ -202,59 +213,72 @@ function StudentRegisterFaceComponent() {
 
     const w = video.videoWidth;
     const h = video.videoHeight;
-    canvas.width = w;
-    canvas.height = h;
+
+    // Fix 4: Only reset canvas dimensions when they actually change — avoids GPU flush every frame
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
 
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, w, h);
 
-    // ✅ Correct canvas draw — video CSS handles the mirror, canvas just overlays
-    ctx.save();
-    ctx.translate(w, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0, w, h);
-    ctx.restore();
+    // Fix 2: No video redraw on canvas — video is mirrored via CSS (style={{ transform: "scaleX(-1)" }})
+    // Canvas only draws the bounding box overlay
 
     if (!detection) {
       lostFaceFramesRef.current++;
       if (lostFaceFramesRef.current >= 25) {
-        setFaceDetected(false);
         stableAngleRef.current = null;
         stableCountRef.current = 0;
+        // Fix 3: Only call setFaceDetected when value actually changes
+        if (faceDetectedStateRef.current) {
+          faceDetectedStateRef.current = false;
+          faceDetectedRef.current = false;
+          setFaceDetected(false);
+        }
       }
       return;
     }
 
     lostFaceFramesRef.current = 0;
-    setFaceDetected(true);
 
+    // Fix 3: Only trigger re-render when face detection state actually changes
+    if (!faceDetectedStateRef.current) {
+      faceDetectedStateRef.current = true;
+      faceDetectedRef.current = true;
+      setFaceDetected(true);
+    }
+
+    // Draw bounding box only
     const box = detection.detection.box;
-    const mirroredX = w - box.x - box.width;
-    ctx.strokeStyle = "lime";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(mirroredX, box.y, box.width, box.height);
+    ctx.strokeStyle = "lime"; 
+    ctx.lineWidth = 3;
+    ctx.strokeRect(box.x, box.y, box.width, box.height);
 
     const pts = detection.landmarks.positions;
-
-    const noseTip  = pts[30];
-    const leftEye  = pts[36];
+    const noseTip = pts[30];
+    const leftEye = pts[36];
     const rightEye = pts[45];
-    const topNose  = pts[27];
     const mouthTop = pts[51];
 
+    // Calculate Yaw (Left/Right)
     const eyeMidX = (leftEye.x + rightEye.x) / 2;
     const eyeDist = Math.abs(rightEye.x - leftEye.x);
-
-    // Yaw: unchanged, works correctly
     const yaw = ((noseTip.x - eyeMidX) / (eyeDist + 1e-6)) * 90;
 
-    const noseToMouth = mouthTop.y - topNose.y;
-    const noseOffset  = noseTip.y - topNose.y;
-    const noseRatio   = noseOffset / (noseToMouth + 1e-6);
-    const pitch       = (noseRatio - 0.50) * 180;
+    // Calculate Pitch Ratio (Up/Down) - more stable than absolute pixel offsets
+    const distToEyeLevel = Math.abs(noseTip.y - ((leftEye.y + rightEye.y) / 2));
+    const distToMouth = Math.abs(noseTip.y - mouthTop.y);
+    const pitchRatio = distToEyeLevel / (distToMouth + 1e-6);
 
-    const detectedAngle = classifyAngle(yaw, pitch);
-    setCurrentAngle(detectedAngle);
+    const detectedAngle = classifyAngle(yaw, pitchRatio);
+
+    // Fix 3: Only call setCurrentAngle when angle actually changes
+    if (currentAngleRef.current !== detectedAngle) {
+      currentAngleRef.current = detectedAngle;
+      setCurrentAngle(detectedAngle);
+    }
 
     if (detectedAngle === stableAngleRef.current) {
       stableCountRef.current++;
@@ -281,12 +305,11 @@ function StudentRegisterFaceComponent() {
     }
   };
 
-  // Uses face-api's yaw/pitch in degrees — much more accurate than ratio math
-  const classifyAngle = (yaw, pitch) => {
-    if (yaw > 18)   return "left";   
-    if (yaw < -18)  return "right";  
-    if (pitch < -20) return "up";   
-    if (pitch > 22)  return "down";  
+  const classifyAngle = (yaw, pitchRatio) => {
+    if (yaw > 20)           return "left";
+    if (yaw < -20)          return "right";
+    if (pitchRatio < 0.55)  return "up";
+    if (pitchRatio > 1.6)   return "down";
     return "front";
   };
 
@@ -312,13 +335,12 @@ function StudentRegisterFaceComponent() {
     const image = captureImage();
     if (!image) return;
 
-    const courseToSend = (formDataRef.current.Course || adminCourse || "").trim().toUpperCase();
+    const courseToSend = (formDataRef.current.Course || adminCourseRef.current || "").trim().toUpperCase();
     if (!courseToSend) {
       toast.error("Course not loaded. Please wait a moment.");
       return;
     }
 
-    // ✅ Always dismiss any previous toast first, then show loading
     toast.dismiss(CAPTURE_TOAST_ID);
     toast.loading(`📸 Capturing ${detectedAngle.toUpperCase()}...`, {
       toastId: CAPTURE_TOAST_ID,
@@ -341,24 +363,24 @@ function StudentRegisterFaceComponent() {
 
       if (res.status === 200) {
         toast.dismiss(CAPTURE_TOAST_ID);
+
         const idx = REQUIRED_ANGLES.indexOf(detectedAngle);
         const isLast = idx === REQUIRED_ANGLES.length - 1;
         const next = !isLast ? REQUIRED_ANGLES[idx + 1] : null;
 
-        // ✅ Update target immediately
+        // Update target ref + state immediately
         if (!isLast && next) {
           targetAngleRef.current = next;
           setTargetAngle(next);
         }
 
-        // ✅ Update angle status
+        // Update angle status ref + state together
         setAngleStatus((prev) => {
           const updated = { ...prev, [detectedAngle]: true };
           angleStatusRef.current = updated;
           return updated;
         });
 
-        // ✅ Update the existing toast to success — no new toast created
         setTimeout(() => {
           toast.success(`✅ ${detectedAngle.toUpperCase()} captured!`, {
             toastId: CAPTURE_TOAST_ID,
@@ -381,17 +403,14 @@ function StudentRegisterFaceComponent() {
           isCapturingRef.current = false;
           setTimeout(() => {
             toast.dismiss(CAPTURE_TOAST_ID);
-            toast.update(CAPTURE_TOAST_ID, {
-              render: "🎉 All angles registered successfully!",
-              type: "success",
-              isLoading: false,
+            toast.success("🎉 All angles registered successfully!", {
+              toastId: CAPTURE_TOAST_ID,
               autoClose: 2500,
               position: "top-right",
             });
             setTimeout(() => navigate("/admin/dashboard"), 2500);
           }, 1900);
         }
-
       } else {
         toast.update(CAPTURE_TOAST_ID, {
           render: "Unexpected server response — try again.",
@@ -429,12 +448,12 @@ function StudentRegisterFaceComponent() {
       toast.warn("Models still loading. Please wait.", { position: "top-right" });
       return;
     }
-    if (!adminCourse || adminCourse === "Unknown Program" || adminCourse.trim() === "") {
+    if (!adminCourseRef.current || adminCourseRef.current === "Unknown Program" || adminCourseRef.current.trim() === "") {
       toast.warn("Program not loaded yet. Please wait a moment.", { position: "top-right" });
       return;
     }
     const ready = ["Student_ID", "First_Name", "Last_Name"].every(
-      (key) => String(formData[key]).trim() !== ""
+      (key) => String(formDataRef.current[key]).trim() !== ""
     );
     if (!ready) {
       toast.warning("Please complete all required fields.", { position: "top-right" });
@@ -459,8 +478,7 @@ function StudentRegisterFaceComponent() {
     });
   };
 
-  const progressPercent =
-    (Object.keys(angleStatus).length / REQUIRED_ANGLES.length) * 100;
+  const progressPercent = (Object.keys(angleStatus).length / REQUIRED_ANGLES.length) * 100;
 
   return (
     <div className="min-h-screen relative bg-neutral-950 text-white px-6 md:px-12 py-12 flex flex-col overflow-hidden">
@@ -477,7 +495,6 @@ function StudentRegisterFaceComponent() {
           to ensure high accuracy during attendance sessions.
         </p>
 
-        {/* Models loading indicator */}
         {!modelsReady && (
           <div className="flex justify-center mb-6">
             <p className="px-4 py-2 rounded-full text-sm bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 animate-pulse">
@@ -490,19 +507,22 @@ function StudentRegisterFaceComponent() {
           {/* LEFT: CAMERA + STATUS */}
           <div className="flex flex-col items-center">
             <div className="relative w-[450px] h-[450px] rounded-2xl overflow-hidden border border-emerald-400/50 backdrop-blur-md shadow-[0_0_40px_rgba(16,185,129,0.3)]">
+              {/* Fix 2: Mirror video via CSS — no drawImage on canvas needed */}
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
                 className="w-full h-full object-cover"
+                style={{ transform: "scaleX(-1)" }}
               />
+              {/* Fix 2: Canvas mirrors too so bounding box aligns with mirrored video */}
               <canvas
                 ref={canvasRef}
                 className="absolute top-0 left-0 w-full h-full pointer-events-none"
+                style={{ transform: "scaleX(-1)" }}
               />
 
-              {/* Angle guide overlay */}
               {isCapturing && !angleStatus[targetAngle] && (
                 <div className="absolute bottom-4 left-0 right-0 flex justify-center">
                   <span className="px-4 py-1 rounded-full text-sm font-semibold bg-black/60 text-emerald-300 border border-emerald-500/50">
@@ -560,9 +580,7 @@ function StudentRegisterFaceComponent() {
                   >
                     {angleStatus[angle] ? (
                       <FaCheckCircle className="text-white text-xl" />
-                    ) : (
-                      "–"
-                    )}
+                    ) : "–"}
                   </div>
                   <span className="text-xs mt-2 text-gray-300 uppercase tracking-wide">
                     {angle}
