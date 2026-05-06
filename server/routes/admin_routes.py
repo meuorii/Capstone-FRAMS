@@ -458,7 +458,7 @@ def delete_student(student_id):
 
         print(f"🗑️ Student {student_id} deleted — refreshing face cache...")
 
-        from routes.face_routes import refresh_face_cache
+        from server.routes.face_routes import refresh_face_cache
 
         refresh_face_cache() 
 
@@ -1401,4 +1401,3 @@ def get_attendance_logs():
     except Exception as e:
         print("❌ Error loading attendance logs:", e)
         return jsonify({"error": "Failed to load attendance logs"}), 500
-
